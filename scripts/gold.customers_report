@@ -1,0 +1,131 @@
+=== created view to generate customers report based on business requirement 
+-- Group customers into thre segments based on their spending behavior
+-- VIP - Customers with 12 Months history and spending more than 5000
+-- Regular -- Customers with 12 months history but spend less than 5000 or less
+-- New -- Customers with a life span of less than 12 months
+-- Find Total number of customers for each group
+WITH Customer_Spending AS
+(
+SELECT
+c.customer_key,
+SUM(f.sales_amount) AS Spendings,
+MIN(order_date) AS First_Order,
+Max(order_date) AS Last_Order,
+DATEDIFF(MONTH,MIN(order_date), Max(order_date)) AS Months
+FROM gold.fact_sales f
+LEFT JOIN gold.dim_customers c
+ON c.customer_key = f.customer_key
+GROUP BY c.customer_key)
+SELECT 
+Customer_Segment,
+COUNT(Customer_Segment) AS Counts
+FROM(
+SELECT
+customer_key,
+Spendings,
+Months,
+CASE WHEN Months >=12 AND Spendings > 5000 THEN 'VIP'
+     WHEN Months >=12 AND Spendings <= 5000 THEN 'Regular'
+     ELSE 'New'
+     END AS Customer_Segment
+FROM Customer_Spending)t
+GROUP BY Customer_Segment
+ORDER BY Counts DESC
+
+--===============================
+-- Customer report 
+-- ===============================
+-- Purpose :- This report consolidates key customer metrics and behaviors
+-- Highlights
+-- 1. Gathers essentital fields such as names, ages, and transaction details
+-- 2. Segments customers into categories (VIP, Regular, new) and age groups
+-- 3. Aggregates customer level metrics
+-- Total orders
+-- Total sales
+-- Total quantity
+-- Total products
+-- lifespan
+-- 4. Calculates valuable KPI's
+-- recency (months since last order)
+-- average order value
+-- average monthly spend
+
+--- This is a base query which Includes essential columns --
+CREATE VIEW gold.customers_report AS
+WITH base_query AS
+(
+SELECT
+f.order_number,
+f.product_key,
+f.order_date,
+f.sales_amount,
+f.quantity,
+c.customer_key,
+c.customer_number,
+c.first_name,
+c.last_name,
+CONCAT(c.first_name, ' ', c.last_name) AS Full_Name,
+c.birthdate,
+COALESCE(DATEDIFF(YEAR, c.birthdate, GETDATE()),0) AS Age
+FROM gold.fact_sales f
+LEFT JOIN gold.dim_customers c
+ON f.customer_key = c.customer_key
+WHERE order_date IS NOT NULL),
+--- Aggregation query for Total sales, products, quanity, customers and orders
+-- -- Total orders
+-- Total sales
+-- Total quantity
+-- Total products
+Customer_aggregation as
+(
+SELECT 
+customer_key,
+customer_number,
+Full_Name,
+Age,
+COUNT(DISTINCT order_number) AS Total_Orders,
+SUM(sales_amount) as Total_Sales,
+SUM(quantity) as Total_quantity,
+COUNT(DISTINCT product_key) AS Total_Products,
+MAX(order_date) AS Last_Order,
+DATEDIFF(MONTH,MIN(order_date), Max(order_date)) AS Lifespan
+FROM base_query
+GROUP BY 
+customer_key,
+customer_number,
+Full_Name,
+Age)
+SELECT 
+customer_key,
+customer_number,
+Full_Name,
+Age,
+CASE WHEN Age < 20 THEN 'Under 20'
+     WHEN Age BETWEEN 20 AND 29 THEN '20-29'
+     WHEN Age BETWEEN 30 AND 39 THEN '30-39'
+     WHEN Age BETWEEN 40 AND 49 THEN '40-49'
+     ELSE 'Above 50'
+     END Age_Group,
+Total_Orders,
+Total_Sales,
+Total_quantity,
+Total_Products,
+Last_Order,
+Lifespan,
+CASE WHEN Lifespan >=12 AND Total_Sales > 5000 THEN 'VIP'
+     WHEN Lifespan >=12 AND Total_Sales <= 5000 THEN 'Regular'
+     ELSE 'New'
+     END AS Customer_Segment,
+-- Calculate recency months since last order 
+DATEDIFF(MONTH, Last_Order, GETDATE()) As Recency,
+-- Calculate average order value
+CASE WHEN Total_Orders = 0 THEN 0
+ELSE Total_Sales / Total_Orders 
+END AS AOV,
+-- Calculate average monthly spend
+CASE WHEN Lifespan = 0 THEN Total_Sales
+ELSE Total_Sales / Lifespan
+END As AMS
+FROM Customer_aggregation
+
+SELECT * FROM gold.customers_report
