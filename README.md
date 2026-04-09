@@ -85,6 +85,3 @@ This project reflects a real-world analytics workflow where data from a curated 
 - Detect opportunities for growth or optimization
 - Answer stakeholder questions with SQL
 
----
-
-## Project Structure
